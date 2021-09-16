@@ -3,9 +3,8 @@ import binascii
 import json
 import os
 import requests
-
 from Crypto.Cipher import AES
-
+from modules.log import logger
 
 # From https://github.com/nnnewb/NEMCore/blob/master/nemcore/encrypt.py
 MODULUS = (
@@ -51,6 +50,7 @@ class NetEaseMusic:
         self.__user_list = netease_music_user_list
         self.__session = requests.Session()
         self.__session.proxies = netease_music_proxies
+        self.__something_wrong = False
 
     def set_proxies(self, netease_music_proxies):
         self.__session.proxies = netease_music_proxies
@@ -59,38 +59,98 @@ class NetEaseMusic:
         self.__user_list = netease_music_user_list
 
     def __get_user_id(self, nickname):
+        logger.info('正在获取userid，用户名：{}', nickname)
+
         text = {
             "s": nickname,
             "type": 1002,
             "offset": 0,
-            "limit": 30
+            "limit": 1
         }
         data = encrypted_request(text)
-        response = self.__session.post('https://music.163.com/weapi/search/get', data=data)
-        user_id = response.json()["result"]["userprofiles"][0]["userId"]
-        return user_id
 
-    def __get_followers(self, nickname):
-        user_id = self.__get_user_id(nickname)
+        try:
+            response = self.__session.post('https://music.163.com/weapi/search/get', data=data)
+        except requests.RequestException as e:
+            logger.error('获取userid失败，用户名：{}，请求失败：{}', nickname, e)
+            return None
+
+        if response.status_code != 200:
+            logger.error('获取userid失败，用户名：{}，HTTP状态码异常：{}', nickname, response.status_code)
+            return None
+
+        response_json = response.json()
+
+        if response_json["code"] == 200:
+            result = response_json["result"]
+
+            if result["userprofileCount"] == 0:
+                logger.warning('获取userid失败，用户名：{}，未找到此用户', nickname)
+                return None
+
+            user_id = result["userprofiles"][0]["userId"]
+            return user_id
+        else:
+            logger.warning('获取userid失败，用户名：{}，Json状态码异常：{}', nickname, response_json["code"])
+            return None
+
+    def __get_followers(self, user_id):
+        logger.info("正在获取粉丝，userid：{}", user_id)
+
         text = {
             "userId": user_id,
-            "limit": 999999999,
+            "limit": 999999999,  # 单次获取大小，应该不至于获取不完
         }
         data = encrypted_request(text)
-        response = self.__session.post('https://music.163.com/weapi/user/getfolloweds', data=data)
+        try:
+            response = self.__session.post('https://music.163.com/weapi/user/getfolloweds', data=data)
+        except requests.RequestException as e:
+            logger.error('获取粉丝失败，userid：{}，请求失败：{}', user_id, e)
+            return None
 
-        followers = response.json()["followeds"]
-        user_set = set()
-        for follower in followers:
-            user_set.add(follower["nickname"])
+        if response.status_code != 200:
+            logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
+            return None
 
-        return user_set
+        response_json = response.json()
+
+        if response_json["code"] != 200:
+            logger.error('获取粉丝失败，userid：{}，Json状态码异常：{}', user_id, response_json["code"])
+            return None
+
+        followers = []
+        result = response_json["followeds"]
+        for follower in result:
+            followers.append(follower["nickname"])
+
+        logger.success("获取粉丝完成，userid：{}", user_id)
+        return followers
 
     def get_all_followers(self):
+        if self.__user_list is None:
+            logger.error("未设置用户列表")
+            return None
+
         follower_pool = {}
         for user in self.__user_list:
-            followers = self.__get_followers(user)
+
+            if (user_id := self.__get_user_id(user)) is None:
+                self.__something_wrong = True
+                logger.warning("获取userid出错，执行跳过")
+                continue
+
+            if (followers := self.__get_followers(user_id)) is None:
+                self.__something_wrong = True
+                logger.warning("获取粉丝出错，执行跳过")
+                continue
+
             follower_pool[user] = followers
+
+        if self.__something_wrong:
+            logger.warning("各帐号粉丝获取完成，发生了一些错误")
+        else:
+            logger.success("各帐号粉丝获取完成")
+
         return follower_pool
 
 
@@ -98,4 +158,4 @@ if __name__ == "__main__":
     myapp = NetEaseMusic()
     user_list = [""]
     myapp.set_user_list(user_list)
-    print(myapp.get_all_followers())
+    myapp.get_all_followers()
