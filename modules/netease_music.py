@@ -5,6 +5,7 @@ import os
 import requests
 from Crypto.Cipher import AES
 from modules.log import logger
+from json import JSONDecodeError
 
 # From https://github.com/nnnewb/NEMCore/blob/master/nemcore/encrypt.py
 MODULUS = (
@@ -73,26 +74,28 @@ class NetEaseMusic:
             response = self.__session.post('https://music.163.com/weapi/search/get', data=data)
         except requests.RequestException as e:
             logger.error('获取userid失败，用户名：{}，请求失败：{}', nickname, e)
-            return None
+            return False
 
         if response.status_code != 200:
             logger.error('获取userid失败，用户名：{}，HTTP状态码异常：{}', nickname, response.status_code)
-            return None
+            return False
 
-        response_json = response.json()
+        try:
+            response_json = response.json()
+            if response_json["code"] != 200:
+                logger.error('获取userid失败，用户名：{}，Json状态码异常：{}', nickname, response_json["code"])
+                return False
+        except JSONDecodeError:
+            logger.error('获取userid失败，用户名：{}，Json解析异常', nickname)
+            return False
 
-        if response_json["code"] == 200:
-            result = response_json["result"]
+        result = response_json["result"]
+        if result["userprofileCount"] == 0:
+            logger.warning('获取userid失败，用户名：{}，未找到此用户', nickname)
+            return False
 
-            if result["userprofileCount"] == 0:
-                logger.warning('获取userid失败，用户名：{}，未找到此用户', nickname)
-                return None
-
-            user_id = result["userprofiles"][0]["userId"]
-            return user_id
-        else:
-            logger.warning('获取userid失败，用户名：{}，Json状态码异常：{}', nickname, response_json["code"])
-            return None
+        user_id = result["userprofiles"][0]["userId"]
+        return user_id
 
     def __get_followers(self, user_id):
         logger.info("正在获取粉丝，userid：{}", user_id)
@@ -106,17 +109,20 @@ class NetEaseMusic:
             response = self.__session.post('https://music.163.com/weapi/user/getfolloweds', data=data)
         except requests.RequestException as e:
             logger.error('获取粉丝失败，userid：{}，请求失败：{}', user_id, e)
-            return None
+            return False
 
         if response.status_code != 200:
             logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
-            return None
+            return False
 
-        response_json = response.json()
-
-        if response_json["code"] != 200:
-            logger.error('获取粉丝失败，userid：{}，Json状态码异常：{}', user_id, response_json["code"])
-            return None
+        try:
+            response_json = response.json()
+            if response_json["code"] != 200:
+                logger.error('获取粉丝失败，userid：{}，Json状态码异常：{}', user_id, response_json["code"])
+                return False
+        except JSONDecodeError:
+            logger.error('获取粉丝失败，userid：{}，Json解析异常', user_id)
+            return False
 
         followers = []
         result = response_json["followeds"]
@@ -127,23 +133,18 @@ class NetEaseMusic:
         return followers
 
     def get_all_followers(self):
-        if self.__user_list is None:
-            logger.error("未设置用户列表")
-            return None
 
         follower_pool = {}
         for user in self.__user_list:
 
-            if (user_id := self.__get_user_id(user)) is None:
+            if not (user_id := self.__get_user_id(user)):
                 self.__something_wrong = True
                 logger.warning("获取userid出错，执行跳过")
                 continue
-
-            if (followers := self.__get_followers(user_id)) is None:
+            if not (followers := self.__get_followers(user_id)):
                 self.__something_wrong = True
                 logger.warning("获取粉丝出错，执行跳过")
                 continue
-
             follower_pool[user] = followers
 
         if self.__something_wrong:
@@ -158,4 +159,4 @@ if __name__ == "__main__":
     myapp = NetEaseMusic()
     user_list = [""]
     myapp.set_user_list(user_list)
-    myapp.get_all_followers()
+    print(myapp.get_all_followers())
