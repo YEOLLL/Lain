@@ -22,16 +22,16 @@ class Github:
         page = 1  # 页面
         followers = []
         while True:
-            url = "https://github.com/{}?&page={}&tab=followers".format(username, str(page))
+            url = "https://github.com/{}?page={}&tab=followers".format(username, str(page))
             try:
                 response = self.__session.get(url)
             except requests.RequestException as e:
                 logger.error("获取粉丝失败，用户名：{}，请求失败：{}", username, e)
-                return None
+                return False
 
             if response.status_code != 200:
                 logger.error('获取粉丝失败，用户名：{}，HTTP状态码异常：{}', username, response.status_code)
-                return None
+                return False
 
             html = etree.HTML(response.text)
 
@@ -48,30 +48,25 @@ class Github:
         return followers
 
     def get_all_followers(self):
-        if self.__user_list is None:
-            logger.error("未设置用户列表")
-            return None
-
-        followers_poll = {}
+        followers_pool = {}
         for user in self.__user_list:
 
-            if (followers := self.__get_followers(user)) is None:
+            if not (followers := self.__get_followers(user)):
                 self.__something_wrong = True
                 logger.warning("获取粉丝出错，执行跳过")
                 continue
-
-            followers_poll[user] = followers
+            followers_pool[user] = followers
 
         if self.__something_wrong:
             logger.warning("各帐号粉丝获取完成，发生了一些错误")
         else:
             logger.success("各帐号粉丝获取完成")
 
-        return followers_poll
+        return followers_pool
 
 
 if __name__ == "__main__":
     myapp = Github()
-    myapp.set_proxies({"https": ""})
-    myapp.set_user_list([""])
+    myapp.set_proxies({'https': 'http://127.0.0.1:7890/'})
+    myapp.set_user_list(["YEOLLL"])
     print(myapp.get_all_followers())
