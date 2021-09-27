@@ -17,6 +17,7 @@ def generate_token(size=16):
 # 登录代码，修改自 https://github.com/CharlesPikachu/DecryptLogin/blob/master/DecryptLogin/core/twitter.py
 def twitter_login(twitter_username, twitter_password, twitter_proxies):
     logger.info("正在登录")
+
     session = requests.Session()
     session.headers = {
         'user-agent': 'Opera/9.80 (J2ME/MIDP; Opera Mini/7.1.32052/29.3417; U; en) Presto/2.8.119 Version/11.10',
@@ -84,7 +85,7 @@ class Twitter:
         self.__password = twitter_password
 
     def __create_session(self):
-        logger.info("正在获取Session")
+        logger.info("正在创建Session")
 
         # 登录
         if not (session := twitter_login(self.__username, self.__password, self.__proxies)):
