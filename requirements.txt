@@ -1,0 +1,4 @@
+lxml==4.6.3
+loguru==0.5.3
+requests==2.25.1
+pycryptodome==3.10.1
