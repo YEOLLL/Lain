@@ -5,7 +5,7 @@ config = {
     },
 
     # 启用的模块
-    "modules_enabled": ["Twitter", "NetEaseMusic", "Github", "DoubanGroup"],
+    "modules_enabled": [""],
 
     # 推特
     "Twitter": {
@@ -13,7 +13,7 @@ config = {
             "username": "",
             "password": ""
         },
-        "user_list": ["CharXD"],
+        "user_list": [""],
         "have_to_login": True,
         "use_proxies": True
     },
@@ -34,6 +34,13 @@ config = {
 
     # 豆瓣小组
     "DoubanGroup": {
+        "user_list": [""],
+        "have_to_login": False,
+        "use_proxies": False
+    },
+
+    # 酷安
+    "Coolapk": {
         "user_list": [""],
         "have_to_login": False,
         "use_proxies": False
