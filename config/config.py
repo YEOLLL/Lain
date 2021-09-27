@@ -35,7 +35,11 @@ config = {
     # 豆瓣小组
     "DoubanGroup": {
         "user_list": [""],
-        "have_to_login": False,
+        "account": {
+            "username": "",
+            "password": ""
+        },
+        "have_to_login": False,  # 可选
         "use_proxies": False
     },
 
