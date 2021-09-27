@@ -4,6 +4,7 @@ import requests
 import random
 import binascii
 from modules.log import logger
+from json import JSONDecodeError
 from functools import reduce
 
 
@@ -48,15 +49,15 @@ def twitter_login(twitter_username, twitter_password, twitter_proxies):
         response = session.post(sessions_url, cookies=cookies, data=data)
     except requests.RequestException as e:
         logger.error("登录失败，请求失败：{}", e)
-        return None
+        return False
 
     if response.status_code != 200:
         logger.error("登录失败，HTTP状态码异常：{}", response.status_code)
-        return None
+        return False
 
     if response.cookies.get("twid") is None:
         logger.error("登录失败，未能正确获取Cookies，请检查配置文件中的账户")
-        return None
+        return False
 
     return session
 
@@ -86,25 +87,25 @@ class Twitter:
         logger.info("正在获取Session")
 
         # 登录
-        if (session := twitter_login(self.__username, self.__password, self.__proxies)) is None:
-            logger.warning("登录失败，发生了一些错误")
-            return None
+        if not (session := twitter_login(self.__username, self.__password, self.__proxies)):
+            logger.error("创建Session出错，登录失败")
+            return False
 
         try:
             response = session.get("https://abs.twimg.com/responsive-web/client-web/main.e1a20265.js")
         except requests.RequestException as e:
             logger.error("创建Session出错，请求失败：{}", e)
-            return None
+            return False
 
         if response.status_code != 200:
             logger.error('创建Session出错，HTTP状态码异常：{}', response.status_code)
-            return None
+            return False
 
         content = response.text
 
         if (result := re.findall(r'c="auth_token",l="(.*?)",d="', content)) is None:
             logger.error("创建Session出错，无法从返回中取出AuthToken")
-            return None
+            return False
         else:
             auth_token = 'Bearer ' + result[0]
             x_csrf_token = session.cookies.get("ct0")
@@ -151,13 +152,17 @@ class Twitter:
             )
         except requests.RequestException as e:
             logger.error("获取userid失败，用户名：{}，请求失败：{}", screen_name, e)
-            return None
+            return False
 
         if response.status_code != 200:
             logger.error("获取userid失败，用户名：{}，HTTP状态码异常：{}", screen_name, response.status_code)
-            return None
+            return False
 
-        return response.json()["data"]["user"]["result"]["rest_id"]
+        try:
+            return response.json()["data"]["user"]["result"]["rest_id"]
+        except JSONDecodeError:
+            logger.error("获取userid失败，用户名：{}，Json解析失败", screen_name)
+            return False
 
     def __get_followers(self, user_id):
         logger.info("正在获取粉丝，userid：{}", user_id)
@@ -188,16 +193,20 @@ class Twitter:
                 )
             except requests.RequestException as e:
                 logger.error("获取粉丝失败，userid：{}，请求失败：{}", user_id, e)
-                return None
+                return False
 
             if response.status_code != 200:
                 logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
-                return None
+                return False
 
-            instructions = response.json()["data"]["user"]["result"]["timeline"]["timeline"]["instructions"]
+            try:
+                instructions = response.json()["data"]["user"]["result"]["timeline"]["timeline"]["instructions"]
+            except JSONDecodeError:
+                logger.error('获取粉丝失败：userid：{}，Json解析失败', user_id)
+                return False
+
             timeline_add_entries = [item for item in instructions if item["type"] == "TimelineAddEntries"][0]
             entries = timeline_add_entries["entries"]
-
             for entry in entries[:-2]:
                 result = entry["content"]["itemContent"]["user_results"]["result"]
                 # 有封禁账户？ "__typename": "UserUnavailable", "reason": "Protected"
@@ -210,29 +219,26 @@ class Twitter:
             # 获取完了结束
             if cursor.split("|")[0] == "0":
                 break
+
         logger.success("获取粉丝完成，userid：{}", user_id)
         return followers
 
     def get_all_followers(self):
-        if self.__session is None:
-            self.__session = self.__create_session()
-            if self.__session is None:
-                logger.error("创建Session出错")
-                return None
-
-        if self.__user_list is None:
-            logger.error("未设置用户列表")
-            return None
+        # 创建 Session
+        self.__session = self.__create_session()
+        if not self.__session:
+            logger.error("获取各帐号粉丝失败，创建Session出错")
+            return False
 
         follower_pool = {}
         for user in self.__user_list:
 
-            if (user_id := self.__get_user_id(user)) is None:
+            if not (user_id := self.__get_user_id(user)):
                 self.__something_wrong = True
                 logger.warning("获取userid出错，执行跳过")
                 continue
 
-            if (followers := self.__get_followers(user_id)) is None:
+            if not (followers := self.__get_followers(user_id)):
                 self.__something_wrong = True
                 logger.warning("获取粉丝出错，执行跳过")
                 continue
@@ -286,10 +292,10 @@ if __name__ == "__main__":
     username = ""
     password = ""
 
-    proxies = {"https": "http://xxx.xxx.xxx.xxx:xxxx"}
+    proxies = {"https": "http://127.0.0.1:7890"}
 
     user_list = [""]
 
     myapp = Twitter(username, password, proxies)
     myapp.set_user_list(user_list)
-    myapp.get_all_followers()
+    print(myapp.get_all_followers())
