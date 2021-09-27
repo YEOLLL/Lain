@@ -49,16 +49,24 @@ class DoubanGroup:
             response = self.__session.get("https://www.douban.com/search", params=params)
         except requests.RequestException as e:
             logger.error("获取小组id失败，小组名：{}，请求失败：{}", group_name, e)
-            return None
+            return False
 
         if response.status_code != 200:
-            logger.error('获取小组id失败，小组名：{}，HTTP状态码异常：{}', group_name, response.status_code)
-            return None
+            if response.status_code == 403:
+                logger.error('获取小组id失败，小组名：{}，登录跳转：请尝试配置登录账户', group_name)
+            else:
+                logger.error('获取小组id失败，小组名：{}，HTTP状态码异常：{}', group_name, response.status_code)
+            return False
 
         html = etree.HTML(response.text)
-        print(response.text)
-        group_href = html.xpath('//*[@id="content"]/div/div[1]/div[3]/div[2]/div/div[2]/div/h3/a/@href')[0]
 
+        # 没有搜索结果，或者结果符合项不匹配
+        if len(html.xpath('//*[@id="content"]/div/div[1]/div[3]/p[@class="no-result"]')) != 0 or \
+                group_name != html.xpath('//*[@id="content"]/div/div[1]/div[3]/div[2]/div/div[2]/div/h3/a/text()'[0]):
+            logger.error('获取小组id失败，小组名：{}，未找到该小组', group_name)
+            return False
+
+        group_href = html.xpath('//*[@id="content"]/div/div[1]/div[3]/div[2]/div/div[2]/div/h3/a/@href')[0]
         return re.findall("group%2F(.*?)%2F&query", group_href)[0]
 
     def __get_members(self, group_id):
@@ -71,11 +79,11 @@ class DoubanGroup:
             response = self.__session.get(f'https://www.douban.com/group/{group_id}/members')
         except requests.RequestException as e:
             logger.error("获取小组成员总数失败，小组id：{}，请求失败：{}", group_id, e)
-            return None
+            return False
 
         if response.status_code != 200:
             logger.error('获取小组成员总数失败，小组id：{}，HTTP状态码异常：{}', group_id, response.status_code)
-            return None
+            return False
 
         html = etree.HTML(response.text)
         count = html.xpath('//*[@id="g-side-info"]/div[2]/div/div/i/text()')[0]
@@ -90,11 +98,11 @@ class DoubanGroup:
                 response = self.__session.get(f'https://www.douban.com/group/{group_id}/members', params=params)
             except requests.RequestException as e:
                 logger.error("获取小组成员失败，小组id：{}，请求失败：{}", group_id, e)
-                return None
+                return False
 
             if response.status_code != 200:
                 logger.error('获取小组成员失败，小组id：{}，HTTP状态码异常：{}', group_id, response.status_code)
-                return None
+                return False
 
             html = etree.HTML(response.text)
             div_mod = html.xpath('//*[@class="mod"]')  # 用户分组， 第一个是组长，第二个是管理员，第三个是成员, 第四个为空。 组长、管理员也在成员内
@@ -113,16 +121,14 @@ class DoubanGroup:
         members_pool = {}
         for group in self.__group_list:
 
-            if (group_id := self.__get_group_id(group)) is None:
+            if not (group_id := self.__get_group_id(group)):
                 self.__something_wrong = True
-                logger.warning("获取userid出错，执行跳过")
+                logger.warning("获取小组id出错，执行跳过")
                 continue
-
-            if (members := self.__get_members(group_id)) is None:
+            if not (members := self.__get_members(group_id)):
                 self.__something_wrong = True
-                logger.warning("获取粉丝出错，执行跳过")
+                logger.warning("获取小组成员出错，执行跳过")
                 continue
-
             members_pool[group] = members
 
         if self.__something_wrong:
@@ -135,6 +141,6 @@ class DoubanGroup:
 
 if __name__ == '__main__':
     myapp = DoubanGroup()
-    group_list = [""]
+    group_list = ["帮军人及恋军女孩儿找对象"]
     myapp.set_user_list(group_list)
     print(myapp.get_all_followers())
