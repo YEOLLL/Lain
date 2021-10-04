@@ -4,6 +4,4 @@ from .netease_music import NetEaseMusic
 from .github import Github
 from .douban_group import DoubanGroup
 from .coolapk import Coolapk
-
-# 日志
-from .log import logger
+from .douyin import Douyin
