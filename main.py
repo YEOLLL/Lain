@@ -10,7 +10,8 @@ class MainApp:
             "NetEaseMusic": NetEaseMusic,
             "Github": Github,
             "DoubanGroup": DoubanGroup,
-            "Coolapk": Coolapk
+            "Coolapk": Coolapk,
+            "Douyin": Douyin
         }
         for k, v in self.modules.items():
             setattr(self, k, v)
