@@ -48,5 +48,12 @@ config = {
         "user_list": [""],
         "have_to_login": False,
         "use_proxies": False
+    },
+
+    # 抖音
+    "Douyin": {
+        "user_list": [""],
+        "have_to_login": False,
+        "user_proxies": False
     }
 }
