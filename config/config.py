@@ -54,6 +54,6 @@ config = {
     "Douyin": {
         "user_list": [""],
         "have_to_login": False,
-        "user_proxies": False
+        "use_proxies": False
     }
 }
