@@ -63,8 +63,8 @@ def douban_login(douban_username, douban_password, douban_proxies):
 
 class DoubanGroup:
     def __init__(self, douban_username=None, douban_password=None, douban_group_proxies=None, douban_group_list=None):
-        self.__username = None
-        self.__password = None
+        self.__username = douban_username
+        self.__password = douban_password
         self.__proxies = douban_group_proxies
         self.__group_list = douban_group_list
         self.__username_closed = '[已注销]'
