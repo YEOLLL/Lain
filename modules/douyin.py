@@ -1,5 +1,6 @@
 import httpx
 import json
+import asyncio
 from modules.log import logger
 
 
@@ -7,13 +8,13 @@ class Douyin:
     def __init__(self, douyin_user_list=None, douyin_proxies=None):
         self.__user_list = douyin_user_list
         self.__proxies = douyin_proxies
-        self.__client = httpx.Client(http2=True, verify=False, proxies=douyin_proxies)
+        self.__client = httpx.AsyncClient(http2=True, verify=False)
         self.__something_wrong = False
 
     def set_user_list(self, douyin_user_list):
         self.__user_list = douyin_user_list
 
-    def __get_uid_and_sec_uid(self, user_number):
+    async def __get_uid_and_sec_uid(self, user_number):
         logger.info('正在获取uid和sec_uid，抖音号：{}', user_number)
 
         headers = {
@@ -63,7 +64,7 @@ class Douyin:
             'keyword': user_number  # 1610503129
         }
         try:
-            response = self.__client.post(
+            response = await self.__client.post(
                 url='https://search100-search-quic-lf.amemv.com/aweme/v1/discover/search/',
                 headers=headers,
                 params=params,
@@ -84,7 +85,7 @@ class Douyin:
 
         return uid, sec_id
 
-    def __get_followers(self, uid, sec_uid):
+    async def __get_followers(self, uid, sec_uid):
         logger.info('正在获取粉丝，uid：{}', uid)
 
         headers = {
@@ -130,7 +131,7 @@ class Douyin:
             )
 
             try:
-                response = self.__client.get(
+                response = await self.__client.get(
                     url='https://api3-normal-c-lf.amemv.com/aweme/v1/user/follower/list/',
                     headers=headers,
                     params=params
@@ -152,19 +153,18 @@ class Douyin:
 
         return followers
 
-    def get_all_followers(self):
-        followers_pool = {}
-        for user in self.__user_list:
-            if not (uid_and_sec_uid := self.__get_uid_and_sec_uid(user)):
-                self.__something_wrong = True
-                logger.warning("获取uid和sec_uid出错，执行跳过")
-                continue
+    async def get_all_followers(self, user):
 
+        followers_pool = {}
+        if not (uid_and_sec_uid := await self.__get_uid_and_sec_uid(user)):
+            self.__something_wrong = True
+            logger.warning("获取uid和sec_uid出错，执行跳过")
+        else:
             uid, sec_uid = uid_and_sec_uid
-            if not (followers := self.__get_followers(uid, sec_uid)):
+            if not (followers := await self.__get_followers(uid, sec_uid)):
                 logger.warning("获取粉丝出错，执行跳过")
-                continue
-            followers_pool[user] = followers
+            else:
+                followers_pool[user] = followers
 
         if self.__something_wrong:
             logger.warning("各帐号粉丝获取完成，发生了一些错误")
@@ -173,8 +173,15 @@ class Douyin:
 
         return followers_pool
 
+    async def clear(self):
+        await self.__client.aclose()
+
 
 if __name__ == '__main__':
     myapp = Douyin()
     myapp.set_user_list(['1610503127'])
-    print(myapp.get_all_followers())
+    loop = asyncio.get_event_loop()
+    tasks = [myapp.get_all_followers(user) for user in ['1610503127']]
+    result = loop.run_until_complete(*tasks)
+    print(result)
+    asyncio.run(myapp.clear())
