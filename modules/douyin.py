@@ -83,7 +83,7 @@ class Douyin:
             logger.error('获取uid和sec_uid出错，返回Json解析失败：{}', e)
             return False
 
-        return uid, sec_id
+        return {user_number: (uid, sec_id)}
 
     async def __get_followers(self, uid, sec_uid):
         logger.info('正在获取粉丝，uid：{}', uid)
@@ -137,51 +137,56 @@ class Douyin:
                     params=params
                 )
             except httpx.RequestError as e:
-                logger.error('获取粉丝出错，请求失败：{}', e)
+                logger.error('获取粉丝出错，uid：{}，请求失败：{}', uid, e)
                 return False
 
             source_type = '1'
 
             try:
                 response_json = response.json()
+                if response_json['status_code'] == 2096:
+                    logger.error('获取粉丝出错，uid：{}，由于该用户隐私设置，列表不可见', uid)
+                    return False
                 has_more = response_json['has_more']
                 min_time = response_json['min_time']
                 followers += [follower['short_id'] for follower in response_json['followers']]
             except json.JSONDecodeError as e:
-                logger.error('获取粉丝出错，返回Json解析失败：{}', e)
+                logger.error('获取粉丝出错，uid：{}，返回Json解析失败：{}', uid, e)
                 return False
 
-        return followers
+        return {(uid, sec_uid): followers}
 
-    async def get_all_followers(self, user):
+    def get_all_followers(self):
+        loop = asyncio.get_event_loop()
 
-        followers_pool = {}
-        if not (uid_and_sec_uid := await self.__get_uid_and_sec_uid(user)):
-            self.__something_wrong = True
-            logger.warning("获取uid和sec_uid出错，执行跳过")
-        else:
-            uid, sec_uid = uid_and_sec_uid
-            if not (followers := await self.__get_followers(uid, sec_uid)):
-                logger.warning("获取粉丝出错，执行跳过")
-            else:
-                followers_pool[user] = followers
+        tasks1 = [self.__get_uid_and_sec_uid(user) for user in self.__user_list]
+        result_list = loop.run_until_complete(asyncio.gather(*tasks1))
+        uid_and_sec_uid = {k: v for result in result_list for k, v in result.items()}
 
-        if self.__something_wrong:
-            logger.warning("各帐号粉丝获取完成，发生了一些错误")
-        else:
-            logger.success("各帐号粉丝获取完成")
+        tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in uid_and_sec_uid.values()]
+        result_list = loop.run_until_complete(asyncio.gather(*tasks2))
+        followers = {k: v for result in result_list for k, v in result.items()}
 
-        return followers_pool
-
-    async def clear(self):
-        await self.__client.aclose()
+        loop.run_until_complete(self.__client.aclose())
+        return {user: followers[uid_and_sec_uid[user]] for user in self.__user_list}
+        # if False in result:
+        #     logger.warning('获取uid和sec_uid完毕，发生了一些错误')
+        #     result.remove(False)
+        # else:
+        #     logger.success('获取uid和sec_uid完毕')
+        #
+        # tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in result]
+        # result = loop.run_until_complete(asyncio.gather(*tasks2))
+        # if False in result:
+        #     logger.warning('获取粉丝完毕，发生了一些错误')
+        # else:
+        #     logger.success('获取粉丝完毕')
+        # print(result)
+        #
+        # return result
 
 
 if __name__ == '__main__':
     myapp = Douyin()
-    myapp.set_user_list(['1610503127'])
-    loop = asyncio.get_event_loop()
-    tasks = [myapp.get_all_followers(user) for user in ['1610503127']]
-    result = loop.run_until_complete(*tasks)
-    print(result)
-    asyncio.run(myapp.clear())
+    myapp.set_user_list(['1610503127', 'chuanchuan5055'])
+    print(myapp.get_all_followers())
