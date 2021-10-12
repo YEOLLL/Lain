@@ -72,7 +72,7 @@ class Douyin:
             )
         except httpx.RequestError as e:
             logger.error('获取uid和sec_uid出错，请求失败：{}', e)
-            return False
+            return {user_number: False}
 
         try:
             raw_data = response.json()['user_list'][0]['dynamic_patch']['raw_data']
@@ -81,7 +81,7 @@ class Douyin:
             sec_id = json_data['user_info']['sec_uid']
         except json.JSONDecodeError as e:
             logger.error('获取uid和sec_uid出错，返回Json解析失败：{}', e)
-            return False
+            return {user_number: False}
 
         return {user_number: (uid, sec_id)}
 
@@ -138,21 +138,26 @@ class Douyin:
                 )
             except httpx.RequestError as e:
                 logger.error('获取粉丝出错，uid：{}，请求失败：{}', uid, e)
-                return False
+                return {(uid, sec_uid): False}
 
             source_type = '1'
 
             try:
                 response_json = response.json()
+            except json.JSONDecodeError as e:
+                logger.error('获取粉丝出错，uid：{}，返回Json解析失败：{}', uid, e)
+                return {(uid, sec_uid): False}
+
+            try:
                 if response_json['status_code'] == 2096:
                     logger.error('获取粉丝出错，uid：{}，由于该用户隐私设置，列表不可见', uid)
-                    return False
+                    return {(uid, sec_uid): False}
                 has_more = response_json['has_more']
                 min_time = response_json['min_time']
                 followers += [follower['short_id'] for follower in response_json['followers']]
-            except json.JSONDecodeError as e:
-                logger.error('获取粉丝出错，uid：{}，返回Json解析失败：{}', uid, e)
-                return False
+            except KeyError as e:
+                logger.error('获取粉丝出错，uid：{}，Key：{}，Raw：{}', e, response_json)
+                return {(uid, sec_uid): False}
 
         return {(uid, sec_uid): followers}
 
@@ -169,6 +174,7 @@ class Douyin:
 
         loop.run_until_complete(self.__client.aclose())
         return {user: followers[uid_and_sec_uid[user]] for user in self.__user_list}
+
         # if False in result:
         #     logger.warning('获取uid和sec_uid完毕，发生了一些错误')
         #     result.remove(False)
