@@ -164,32 +164,41 @@ class Douyin:
     def get_all_followers(self):
         loop = asyncio.get_event_loop()
 
+        # 任务一，获取uid和sec_uid
         tasks1 = [self.__get_uid_and_sec_uid(user) for user in self.__user_list]
+        # result_list --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
         result_list = loop.run_until_complete(asyncio.gather(*tasks1))
-        uid_and_sec_uid = {k: v for result in result_list for k, v in result.items()}
 
+        # error_account --> [ user_number, user_number ]
+        # uid_and_sec_uid --> { user_number: (uid, sec_id), user_number: (uid, sec_uid) }
+        error_account = [k for result in result_list for k, v in result.items() if v is False]  # 执行失败加入 error_account
+        uid_and_sec_uid = {k: v for result in result_list for k, v in result.items() if v is not False}
+
+        # 判断是否有运行失败的账户，记录日志
+        if len(error_account) > 0:
+            logger.warning('获取uid和sec_uid完毕，发生了一些错误，error_account：{}', error_account)
+        else:
+            logger.success('获取uid和sec_uid完毕')
+
+        # 任务二，获取粉丝
         tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in uid_and_sec_uid.values()]
+        # result_list --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
         result_list = loop.run_until_complete(asyncio.gather(*tasks2))
-        followers = {k: v for result in result_list for k, v in result.items()}
 
+        # error_account --> [ user_number, user_number ]
+        # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
+        error_account = [k for result in result_list for k, v in result.items() if v is False]  # 执行失败加入 error_account
+        followers = {k: v for result in result_list for k, v in result.items() if v is not False}
+
+        if len(error_account) > 0:
+            logger.warning('获取粉丝完毕，发生了一些错误，error_account：{}', error_account)
+        else:
+            logger.success('获取粉丝完毕')
+
+        # 关闭 client
         loop.run_until_complete(self.__client.aclose())
-        return {user: followers[uid_and_sec_uid[user]] for user in self.__user_list}
 
-        # if False in result:
-        #     logger.warning('获取uid和sec_uid完毕，发生了一些错误')
-        #     result.remove(False)
-        # else:
-        #     logger.success('获取uid和sec_uid完毕')
-        #
-        # tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in result]
-        # result = loop.run_until_complete(asyncio.gather(*tasks2))
-        # if False in result:
-        #     logger.warning('获取粉丝完毕，发生了一些错误')
-        # else:
-        #     logger.success('获取粉丝完毕')
-        # print(result)
-        #
-        # return result
+        return {user: followers[uid_and_sec_uid[user]] for user in self.__user_list}
 
 
 if __name__ == '__main__':
