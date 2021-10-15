@@ -63,6 +63,7 @@ class Douyin:
             'location_access': '2',
             'keyword': user_number  # 1610503129
         }
+
         try:
             response = await self.__client.post(
                 url='https://search100-search-quic-lf.amemv.com/aweme/v1/discover/search/',
@@ -81,6 +82,9 @@ class Douyin:
             sec_id = json_data['user_info']['sec_uid']
         except json.JSONDecodeError as e:
             logger.error('获取uid和sec_uid出错，返回Json解析失败：{}', e)
+            return {user_number: False}
+        except KeyError as e:
+            logger.error('获取uid和sec_uid出错，KeyError，Key：{}', e)
             return {user_number: False}
 
         return {user_number: (uid, sec_id)}
@@ -156,7 +160,7 @@ class Douyin:
                 min_time = response_json['min_time']
                 followers += [follower['short_id'] for follower in response_json['followers']]
             except KeyError as e:
-                logger.error('获取粉丝出错，uid：{}，Key：{}，Raw：{}', e, response_json)
+                logger.error('获取粉丝出错，KeyError, uid：{}，Key：{}, Raw：{}', uid, e, response_json)
                 return {(uid, sec_uid): False}
 
         return {(uid, sec_uid): followers}
@@ -166,15 +170,16 @@ class Douyin:
 
         # 任务一，获取uid和sec_uid
         tasks1 = [self.__get_uid_and_sec_uid(user) for user in self.__user_list]
-        # result_list --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
-        result_list = loop.run_until_complete(asyncio.gather(*tasks1))
+        # results --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
+        results = loop.run_until_complete(
+            asyncio.gather(*tasks1)
+        )
 
         # error_account --> [ user_number, user_number ]
         # uid_and_sec_uid --> { user_number: (uid, sec_id), user_number: (uid, sec_uid) }
-        error_account = [k for result in result_list for k, v in result.items() if v is False]  # 执行失败加入 error_account
-        uid_and_sec_uid = {k: v for result in result_list for k, v in result.items() if v is not False}
+        error_account = [k for result in results for k, v in result.items() if v is False]  # 执行失败加入 error_account
+        uid_and_sec_uid = {k: v for result in results for k, v in result.items() if v is not False}
 
-        # 判断是否有运行失败的账户，记录日志
         if len(error_account) > 0:
             logger.warning('获取uid和sec_uid完毕，发生了一些错误，error_account：{}', error_account)
         else:
@@ -182,23 +187,26 @@ class Douyin:
 
         # 任务二，获取粉丝
         tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in uid_and_sec_uid.values()]
-        # result_list --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
-        result_list = loop.run_until_complete(asyncio.gather(*tasks2))
+        # results --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
+        results = loop.run_until_complete(
+            asyncio.gather(*tasks2)
+        )
 
         # error_account --> [ user_number, user_number ]
         # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
-        error_account = [k for result in result_list for k, v in result.items() if v is False]  # 执行失败加入 error_account
-        followers = {k: v for result in result_list for k, v in result.items() if v is not False}
+        error_account = [k for result in results for k, v in result.items() if v is False]  # 执行失败加入 error_account
+        followers = {k: v for result in results for k, v in result.items() if v is not False}
 
         if len(error_account) > 0:
-            logger.warning('获取粉丝完毕，发生了一些错误，error_account：{}', error_account)
+            logger.warning('获取粉丝完毕，发生了一些错误，错误账户：{}', error_account)
         else:
             logger.success('获取粉丝完毕')
 
         # 关闭 client
         loop.run_until_complete(self.__client.aclose())
 
-        return {user: followers[uid_and_sec_uid[user]] for user in self.__user_list}
+        # 可读性为 0
+        return {k2: v1 for k1, v1 in followers.items() for k2, v2 in uid_and_sec_uid.items() if k1 == v2}
 
 
 if __name__ == '__main__':
