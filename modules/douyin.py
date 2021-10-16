@@ -1,7 +1,9 @@
 import httpx
 import json
 import asyncio
-from modules.log import logger
+from utils.log import logger
+from utils.handle_results import handle_results
+from utils.exception import *
 
 
 class Douyin:
@@ -64,28 +66,17 @@ class Douyin:
             'keyword': user_number  # 1610503129
         }
 
-        try:
-            response = await self.__client.post(
-                url='https://search100-search-quic-lf.amemv.com/aweme/v1/discover/search/',
-                headers=headers,
-                params=params,
-                data=data
-            )
-        except httpx.RequestError as e:
-            logger.error('获取uid和sec_uid出错，请求失败：{}', e)
-            return {user_number: False}
+        response = await self.__client.post(
+            url='https://search100-search-quic-lf.amemv.com/aweme/v1/discover/search/',
+            headers=headers,
+            params=params,
+            data=data
+        )
 
-        try:
-            raw_data = response.json()['user_list'][0]['dynamic_patch']['raw_data']
-            json_data = json.loads(raw_data)
-            uid = json_data['user_info']['uid']
-            sec_id = json_data['user_info']['sec_uid']
-        except json.JSONDecodeError as e:
-            logger.error('获取uid和sec_uid出错，返回Json解析失败：{}', e)
-            return {user_number: False}
-        except KeyError as e:
-            logger.error('获取uid和sec_uid出错，KeyError，Key：{}', e)
-            return {user_number: False}
+        raw_data = response.json()['user_list'][0]['dynamic_patch']['raw_data']
+        json_data = json.loads(raw_data)
+        uid = json_data['user_info']['uid']
+        sec_id = json_data['user_info']['sec_uid']
 
         return {user_number: (uid, sec_id)}
 
@@ -134,34 +125,19 @@ class Douyin:
                 ('ts', '1633253610'),
             )
 
-            try:
-                response = await self.__client.get(
-                    url='https://api3-normal-c-lf.amemv.com/aweme/v1/user/follower/list/',
-                    headers=headers,
-                    params=params
-                )
-            except httpx.RequestError as e:
-                logger.error('获取粉丝出错，uid：{}，请求失败：{}', uid, e)
-                return {(uid, sec_uid): False}
+            response = await self.__client.get(
+                url='https://api3-normal-c-lf.amemv.com/aweme/v1/user/follower/list/',
+                headers=headers,
+                params=params
+            )
 
-            source_type = '1'
-
-            try:
-                response_json = response.json()
-            except json.JSONDecodeError as e:
-                logger.error('获取粉丝出错，uid：{}，返回Json解析失败：{}', uid, e)
-                return {(uid, sec_uid): False}
-
-            try:
-                if response_json['status_code'] == 2096:
-                    logger.error('获取粉丝出错，uid：{}，由于该用户隐私设置，列表不可见', uid)
-                    return {(uid, sec_uid): False}
-                has_more = response_json['has_more']
-                min_time = response_json['min_time']
-                followers += [follower['short_id'] for follower in response_json['followers']]
-            except KeyError as e:
-                logger.error('获取粉丝出错，KeyError, uid：{}，Key：{}, Raw：{}', uid, e, response_json)
-                return {(uid, sec_uid): False}
+            source_type = '1'  # 先使用2获取第一次的min_time，之后使用1获取数据
+            response_json = response.json()
+            if response_json['status_code'] == 2096:
+                raise NotAllowToGet
+            has_more = response_json['has_more']
+            min_time = response_json['min_time']
+            followers += [follower['short_id'] for follower in response_json['followers']]
 
         return {(uid, sec_uid): followers}
 
@@ -172,35 +148,23 @@ class Douyin:
         tasks1 = [self.__get_uid_and_sec_uid(user) for user in self.__user_list]
         # results --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
         results = loop.run_until_complete(
-            asyncio.gather(*tasks1)
+            asyncio.gather(*tasks1, return_exceptions=True),
         )
 
-        # error_account --> [ user_number, user_number ]
-        # uid_and_sec_uid --> { user_number: (uid, sec_id), user_number: (uid, sec_uid) }
-        error_account = [k for result in results for k, v in result.items() if v is False]  # 执行失败加入 error_account
-        uid_and_sec_uid = {k: v for result in results for k, v in result.items() if v is not False}
+        results = handle_results(results, self.__user_list, '获取uid和sec_uid')
 
-        if len(error_account) > 0:
-            logger.warning('获取uid和sec_uid完毕，发生了一些错误，error_account：{}', error_account)
-        else:
-            logger.success('获取uid和sec_uid完毕')
+        # uid_and_sec_uid --> { user_number: (uid, sec_id), user_number: (uid, sec_uid) }
+        uid_and_sec_uid = {k: v for result in results for k, v in result.items()}
 
         # 任务二，获取粉丝
         tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in uid_and_sec_uid.values()]
         # results --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
         results = loop.run_until_complete(
-            asyncio.gather(*tasks2)
+            asyncio.gather(*tasks2, return_exceptions=True)
         )
-
-        # error_account --> [ user_number, user_number ]
+        results = handle_results(results, list(uid_and_sec_uid.values()), '获取粉丝')
         # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
-        error_account = [k for result in results for k, v in result.items() if v is False]  # 执行失败加入 error_account
-        followers = {k: v for result in results for k, v in result.items() if v is not False}
-
-        if len(error_account) > 0:
-            logger.warning('获取粉丝完毕，发生了一些错误，错误账户：{}', error_account)
-        else:
-            logger.success('获取粉丝完毕')
+        followers = {k: v for result in results for k, v in result.items()}
 
         # 关闭 client
         loop.run_until_complete(self.__client.aclose())
