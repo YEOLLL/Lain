@@ -1,6 +1,7 @@
 from modules import *
 from config import *
 from os import mkdir, path
+from utils.log import logger
 
 
 class MainApp:
@@ -59,9 +60,10 @@ if __name__ == "__main__":
         # 获取全部粉丝
         logger.info("正在启用模块：{}", module_name)
 
-        if not (followers_dict := module.get_all_followers()):
-            logger.warning("模块运行出错，跳过并开始运行下一模块")
-
+        try:
+            followers_dict = module.get_all_followers()
+        except KeyboardInterrupt:
+            logger.warning('用户主动退出，正在关闭模块')
         else:
             for user, followers in followers_dict.items():
                 # 为每个用户创建单独的文件
@@ -70,12 +72,9 @@ if __name__ == "__main__":
                     f.write(str(followers))
             logger.info("模块运行完毕：{}", module_name)
 
-        # 分割线
-        logger.opt(
-            raw=True,
-            colors=True,
-            record=True
-        ).info(
-            "<level>[{record[level]}]</level> ----------------------------------------------------------------\n"
-        )
-
+            # 分割线
+            logger.opt(
+                raw=True, colors=True, record=True
+            ).info(
+                "<level>[{record[level]}]</level> ----------------------------------------------------------------\n"
+            )
