@@ -5,6 +5,3 @@ from .github import Github
 from .douban_group import DoubanGroup
 from .coolapk import Coolapk
 from .douyin import Douyin
-
-# 日志
-from .log import logger
