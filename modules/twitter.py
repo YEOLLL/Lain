@@ -3,9 +3,8 @@ import json
 import requests
 import random
 import binascii
-from modules.log import logger
+from utils.log import logger
 from json import JSONDecodeError
-from functools import reduce
 
 
 # token生成，修改自 https://github.com/CharlesPikachu/DecryptLogin/blob/master/DecryptLogin/core/twitter.py

@@ -1,7 +1,7 @@
 import requests
 import re
 from lxml import etree
-from modules.log import logger
+from utils.log import logger
 from json import JSONDecodeError
 
 

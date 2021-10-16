@@ -3,7 +3,7 @@ import time
 import base64
 from _md5 import md5
 from json import JSONDecodeError
-from modules.log import logger
+from utils.log import logger
 
 
 # 获取x-app-token算法，来自 https://github.com/PinkD/CoolApkApiTokenGenerator

@@ -4,7 +4,7 @@ import json
 import os
 import requests
 from Crypto.Cipher import AES
-from modules.log import logger
+from utils.log import logger
 from json import JSONDecodeError
 
 # From https://github.com/nnnewb/NEMCore/blob/master/nemcore/encrypt.py
