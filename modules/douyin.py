@@ -9,9 +9,7 @@ from utils.exception import *
 class Douyin:
     def __init__(self, douyin_user_list=None, douyin_proxies=None):
         self.__user_list = douyin_user_list
-        self.__proxies = douyin_proxies
-        self.__client = httpx.AsyncClient(http2=True, verify=False)
-        self.__something_wrong = False
+        self.__client = httpx.AsyncClient(http2=True, verify=False, proxies=douyin_proxies)
 
     def set_user_list(self, douyin_user_list):
         self.__user_list = douyin_user_list
