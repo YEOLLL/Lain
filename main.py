@@ -11,7 +11,7 @@ class MainApp:
             "NetEaseMusic": NetEaseMusic,
             "Github": Github,
             "DoubanGroup": DoubanGroup,
-            "Coolapk": Coolapk,
+            "CoolAPK": Coolapk,
             "Douyin": Douyin
         }
         for k, v in self.modules.items():
