@@ -1,9 +1,11 @@
-import requests
+import httpx
 import time
 import base64
+import asyncio
 from _md5 import md5
-from json import JSONDecodeError
 from utils.log import logger
+from utils.exception import *
+from utils.handle_results import handle_results
 
 
 # 获取x-app-token算法，来自 https://github.com/PinkD/CoolApkApiTokenGenerator
@@ -35,11 +37,10 @@ def get_as(device_id="00000000-0000-0000-0000-000000000000") -> str:
 class Coolapk:
     def __init__(self, coolapk_proxies=None, coolapk_user_list=None):
         self.__user_list = coolapk_user_list
-        self.__something_wrong = False
 
-        self.__session = requests.Session()
+        self.__client = httpx.AsyncClient(proxies=coolapk_proxies)
         x_app_token = get_as()
-        self.__session.headers = {
+        self.__client.headers = {
             'User-Agent': 'CoolMarket/11.2.6-2106281-universal',
             'X-Requested-With': 'XMLHttpRequest',
             'X-Sdk-Int': '30',
@@ -57,15 +58,11 @@ class Coolapk:
             'Connection': 'Keep-Alive',
             'Accept-Encoding': 'gzip',
         }
-        self.__session.proxies = coolapk_proxies
-
-    def set_proxies(self, coolapk_proxies):
-        self.__session.proxies = coolapk_proxies
 
     def set_user_list(self, coolapk_user_list):
         self.__user_list = coolapk_user_list
 
-    def __get_user_id(self, username):
+    async def __get_user_id(self, username):
         logger.info('正在获取userid，用户名：{}', username)
 
         params = (
@@ -74,88 +71,82 @@ class Coolapk:
             ('page', '1'),
             ('showAnonymous', '-1'),
         )
-        try:
-            response = self.__session.get('https://api.coolapk.com/v6/search', params=params)
-        except requests.RequestException as e:
-            logger.error('获取userid出错，用户名：{}，请求失败：{}', username, e)
-            return False
+        response = await self.__client.get(
+            'https://api.coolapk.com/v6/search',
+            params=params
+        )
 
         if response.status_code != 200:
-            logger.error('获取userid出错，用户名：{}，HTTP状态码异常：{]', username, response.status_code)
-            return False
+            raise HttpCodeError(response.status_code)
 
-        try:
-            response_json = response.json()
-            if len(response_json['data']) == 0:
-                logger.error('获取userid出错，用户名：{}，未查找到该用户', username)
-                return False
-        except JSONDecodeError:
-            logger.error('获取userid出错，用户名：{}，返回json解析失败', username)
-            return False
+        response_json = response.json()
+
+        if len(response_json['data']) == 0:
+            raise UserNotFound
 
         user_data = response_json['data'][0]
         uid = user_data['uid']
-        return uid
+        return {username: uid}
 
-    def __get_followers(self, user_id):
-        logger.info('正在获取粉丝，userid：{}', user_id)
+    async def __get_followers(self, uid):
+        logger.info('正在获取粉丝，uid：{}', uid)
 
         followers = []
         page = 1
 
+        # 一次 20 个
         while True:
             params = (
-                ('uid', user_id),
+                ('uid', uid),
                 ('page', str(page)),
             )
 
-            try:
-                response = self.__session.get('https://api.coolapk.com/v6/user/fansList', params=params)
-            except requests.RequestException as e:
-                logger.error("获取粉丝失败，userid：{}，请求失败：{}", user_id, e)
-                return False
+            response = await self.__client.get('https://api.coolapk.com/v6/user/fansList', params=params)
 
             if response.status_code != 200:
-                logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
-                return False
+                raise HttpCodeError(response.status_code)
 
-            try:
-                response_json = response.json()
-                user_data_list = response_json['data']
-            except JSONDecodeError:
-                logger.error('获取粉丝失败，userid：{}，返回json解析失败', user_id)
-                return False
+            response_json = response.json()
+            user_data_list = response_json['data']
 
             # 获取完毕
             if len(user_data_list) == 0:
                 break
-
             for user_data in user_data_list:
                 username = user_data['username']
                 followers.append(username)
             page += 1
 
-        return followers
+        return {uid: followers}
 
     def get_all_followers(self):
-        followers_pool = {}
-        for user in self.__user_list:
-            if not (user_id := self.__get_user_id(user)):
-                self.__something_wrong = True
-                logger.warning("获取UserId出错，执行跳过")
-                continue
-            if not (followers := self.__get_followers(user_id)):
-                self.__something_wrong = True
-                logger.warning("获取粉丝出错，执行跳过")
-                continue
-            followers_pool[user] = followers
+        loop = asyncio.get_event_loop()
 
-        if self.__something_wrong:
-            logger.warning("各帐号粉丝获取完成，发生了一些错误")
-        else:
-            logger.success("各帐号粉丝获取完成")
+        # 任务一，获取uid
+        tasks1 = [self.__get_user_id(user) for user in self.__user_list]
+        # results --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
+        results = loop.run_until_complete(
+            asyncio.gather(*tasks1, return_exceptions=True),
+        )
+        results = handle_results(results, self.__user_list, '获取uid')
+        # uid_dict --> { username: uid, username: uid }
+        uid_dict = {k: v for result in results for k, v in result.items()}
 
-        return followers_pool
+        # 任务二，获取粉丝
+        tasks2 = [self.__get_followers(uid) for uid in uid_dict.values()]
+        # results --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
+        results = loop.run_until_complete(
+            asyncio.gather(*tasks2, return_exceptions=True)
+        )
+        results = handle_results(results, list(uid_dict.values()), '获取粉丝')
+        # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
+        followers_dict = {k: v for result in results for k, v in result.items()}
+
+        # 关闭 client
+        loop.run_until_complete(self.__client.aclose())
+
+        # 可读性为 0
+        return {k2: v1 for k1, v1 in followers_dict.items() for k2, v2 in uid_dict.items() if k1 == v2}
 
 
 if __name__ == '__main__':
