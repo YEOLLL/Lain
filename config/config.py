@@ -5,7 +5,7 @@ config = {
     },
 
     # 启用的模块
-    "modules_enabled": [""],
+    "modules_enabled": [],
 
     # 推特
     "Twitter": {
@@ -44,7 +44,7 @@ config = {
     },
 
     # 酷安
-    "Coolapk": {
+    "CoolAPK": {
         "user_list": [""],
         "have_to_login": False,
         "use_proxies": False
@@ -52,7 +52,7 @@ config = {
 
     # 抖音
     "Douyin": {
-        "user_list": [""],
+        "user_list": [''],
         "have_to_login": False,
         "use_proxies": False
     }
