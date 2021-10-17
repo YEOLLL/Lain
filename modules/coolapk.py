@@ -35,8 +35,8 @@ def get_as(device_id="00000000-0000-0000-0000-000000000000") -> str:
 
 
 class Coolapk:
-    def __init__(self, coolapk_proxies=None, coolapk_user_list=None):
-        self.__user_list = coolapk_user_list
+    def __init__(self, coolapk_proxies=None):
+        self.__user_list = None
 
         self.__client = httpx.AsyncClient(proxies=coolapk_proxies)
         x_app_token = get_as()
