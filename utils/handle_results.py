@@ -27,6 +27,16 @@ def handle_results(results, account, msg):
             has_error = True
             error_account.append(account[index])
 
+        elif isinstance(value, UserNotFound):
+            logger.error('{}错误，未查找到该用户，Account：{}', msg, account[index])
+            has_error = True
+            error_account.append(account[index])
+
+        elif isinstance(value, HttpCodeError):
+            logger.error('{}错误，HTTP状态码异常：{}，Account：{}', msg, value, account[index])
+            has_error = True
+            error_account.append(account[index])
+
         else:
             return_results.append(value)
 
