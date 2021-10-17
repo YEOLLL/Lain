@@ -13,7 +13,25 @@ class DoubanGroup:
         self.__password = None
         self.__group_list = None
         self.__username_closed = '[已注销]'
+        self.__proxies = proxies
         self.__client = httpx.AsyncClient(proxies=proxies)
+        self.__client.headers = {
+            'Connection': 'keep-alive',
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache',
+            'sec-ch-ua': '" Not A;Brand";v="99", "Chromium";v="90"',
+            'sec-ch-ua-mobile': '?0',
+            'DNT': '1',
+            'Upgrade-Insecure-Requests': '1',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.21 (KHTML, like Gecko) konqueror/4.14.10 Safari/537.21',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
+            'Referer': 'https://www.douban.com/group/',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
 
     def set_login_username(self, douban_username):
         self.__username = douban_username
@@ -93,7 +111,6 @@ class DoubanGroup:
             ('cat ', '1019'),  # 分类代码，1019为小组
             ('q', group_name)
         )
-
         response = await self.__client.get("https://www.douban.com/search", params=params)
 
         if response.status_code != 200:
@@ -106,11 +123,12 @@ class DoubanGroup:
 
         # 没有搜索结果，或者结果符合项不匹配
         if len(html.xpath('//*[@id="content"]/div/div[1]/div[3]/p[@class="no-result"]')) != 0 or \
-                group_name != html.xpath('//*[@id="content"]/div/div[1]/div[3]/div[2]/div/div[2]/div/h3/a/text()'[0]):
+                group_name != html.xpath('//*[@id="content"]/div/div[1]/div[3]/div[2]/div/div[2]/div/h3/a/text()')[0]:
             raise UserNotFound
 
         group_href = html.xpath('//*[@id="content"]/div/div[1]/div[3]/div[2]/div/div[2]/div/h3/a/@href')[0]
-        return re.findall("group%2F(.*?)%2F&query", group_href)[0]
+        group_id = re.findall("group%2F(.*?)%2F&query", group_href)[0]
+        return {group_name: group_id}
 
     async def __get_members(self, group_id):
         logger.info("正在获取小组成员，小组id：{}", group_id)
@@ -148,7 +166,7 @@ class DoubanGroup:
                 if name != self.__username_closed:
                     group_members.append(name)
 
-        return group_members
+        return {group_id: group_members}
 
     def get_all_followers(self):
         loop = asyncio.get_event_loop()
@@ -178,7 +196,7 @@ class DoubanGroup:
 
         loop.run_until_complete(self.__client.aclose())
 
-        return member_dict
+        return {k2: v1 for k1, v1 in member_dict.items() for k2, v2 in group_id_dict.items() if k1 == v2}
 
 
 if __name__ == '__main__':
