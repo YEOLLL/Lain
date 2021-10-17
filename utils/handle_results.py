@@ -37,6 +37,16 @@ def handle_results(results, account, msg):
             has_error = True
             error_account.append(account[index])
 
+        elif isinstance(value, NeedLogin):
+            logger.error('{}错误，平台提示需要登录，Account：{}', msg, account[index])
+            has_error = True
+            error_account.append(account[index])
+
+        elif isinstance(value, LoginError):
+            logger.error('{}错误，登录失败：{}，Account：{}', msg, value, account[index])
+            has_error = True
+            error_account.append(account[index])
+
         else:
             return_results.append(value)
 
