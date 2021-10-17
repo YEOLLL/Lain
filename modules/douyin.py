@@ -7,9 +7,9 @@ from utils.exception import *
 
 
 class Douyin:
-    def __init__(self, douyin_proxies=None):
+    def __init__(self, proxies=None):
         self.__user_list = None
-        self.__client = httpx.AsyncClient(http2=True, verify=False, proxies=douyin_proxies)
+        self.__client = httpx.AsyncClient(http2=True, verify=False, proxies=proxies)
 
     def set_user_list(self, douyin_user_list):
         self.__user_list = douyin_user_list
@@ -160,7 +160,7 @@ class Douyin:
         results = loop.run_until_complete(
             asyncio.gather(*tasks2, return_exceptions=True)
         )
-        results = handle_results(results, list(uid_and_sec_uid.values()), '获取粉丝')
+        results = handle_results(results, uid_and_sec_uid.values(), '获取粉丝')
         # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
         followers = {k: v for result in results for k, v in result.items()}
 

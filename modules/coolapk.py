@@ -35,10 +35,10 @@ def get_as(device_id="00000000-0000-0000-0000-000000000000") -> str:
 
 
 class Coolapk:
-    def __init__(self, coolapk_proxies=None):
+    def __init__(self, proxies=None):
         self.__user_list = None
 
-        self.__client = httpx.AsyncClient(proxies=coolapk_proxies)
+        self.__client = httpx.AsyncClient(proxies=proxies)
         x_app_token = get_as()
         self.__client.headers = {
             'User-Agent': 'CoolMarket/11.2.6-2106281-universal',
