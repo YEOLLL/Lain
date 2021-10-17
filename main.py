@@ -34,7 +34,13 @@ if __name__ == "__main__":
     if modules_enabled == "All":
         modules_enabled = main_app.modules.keys()
 
-    # for module_name in main_app.modules.keys():
+    # 分割线
+    logger.opt(
+        raw=True, colors=True, record=True
+    ).info(
+        "<level>[{record[level]}]</level> ----------------------------------------------------------------\n"
+    )
+
     for module_name in modules_enabled:
         # 每个模块的结果存储到各自的文件夹
         module_output_path = path.join(main_app.output_path, module_name)
@@ -43,16 +49,16 @@ if __name__ == "__main__":
 
         # 获取模块
         attr = getattr(main_app, module_name)
-        module = attr()
+        # 设置代理，如果配置了的话
+        if config[module_name]["use_proxies"]:
+            module = attr(config["proxies"])
+        else:
+            module = attr()
 
         # 需要登录则传入配置中的账户
         if config[module_name]["have_to_login"]:
             module.set_login_username(config[module_name]["account"]["username"])
             module.set_login_password(config[module_name]["account"]["password"])
-
-        # 设置代理，如果配置了的话
-        if config[module_name]["use_proxies"]:
-            module.set_proxies(config["proxies"])
 
         # 设置用户列表
         module.set_user_list(config[module_name]["user_list"])
