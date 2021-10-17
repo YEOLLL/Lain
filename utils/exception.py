@@ -12,3 +12,11 @@ class UserNotFound(Exception):
 
 class HttpCodeError(Exception):
     pass
+
+
+class NeedLogin(Exception):
+    pass
+
+
+class LoginError(Exception):
+    pass
