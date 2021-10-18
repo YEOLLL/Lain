@@ -1,3 +1,5 @@
+import asyncio
+
 from modules import *
 from config import *
 from os import mkdir, path
@@ -41,6 +43,8 @@ if __name__ == "__main__":
         "<level>[{record[level]}]</level> ----------------------------------------------------------------\n"
     )
 
+    loop = asyncio.get_event_loop()
+
     for module_name in modules_enabled:
         # 每个模块的结果存储到各自的文件夹
         module_output_path = path.join(main_app.output_path, module_name)
@@ -67,7 +71,7 @@ if __name__ == "__main__":
         logger.info("正在启用模块：{}", module_name)
 
         try:
-            followers_dict = module.get_all_followers()
+            followers_dict = loop.run_until_complete(module.run())
         except KeyboardInterrupt:
             logger.warning('用户主动退出，正在关闭模块')
         else:
