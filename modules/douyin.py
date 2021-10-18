@@ -139,39 +139,46 @@ class Douyin:
 
         return {(uid, sec_uid): followers}
 
-    def get_all_followers(self):
-        loop = asyncio.get_event_loop()
+    async def run(self):
+        user_dict = {}  # (uid, sec_uid) <-> douyin_number
+        uid_and_sec_uid_list = []  # (uid, sec_uid), (uid, sec_uid)
+        followers_dict = {}  # douyin_number <-> followers
 
-        # 任务一，获取uid和sec_uid
-        tasks1 = [self.__get_uid_and_sec_uid(user) for user in self.__user_list]
-        # results --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
-        results = loop.run_until_complete(
-            asyncio.gather(*tasks1, return_exceptions=True),
+        # 获取 uid 和 sec_uid
+        results = await asyncio.gather(
+            *[self.__get_uid_and_sec_uid(user) for user in self.__user_list],
+            return_exceptions=True
         )
+        results = handle_results(results, self.__user_list, '获取uid和sec_uid')  # 处理异常
+        # 将 uid 和 sec_uid 与用户名对应存进 user_dict
+        for result in results:
+            for username, uid in result.items():
+                user_dict.update(
+                    {uid: username}
+                )
+                uid_and_sec_uid_list.append(uid)
 
-        results = handle_results(results, self.__user_list, '获取uid和sec_uid')
-
-        # uid_and_sec_uid --> { user_number: (uid, sec_id), user_number: (uid, sec_uid) }
-        uid_and_sec_uid = {k: v for result in results for k, v in result.items()}
-
-        # 任务二，获取粉丝
-        tasks2 = [self.__get_followers(uid, sec_uid) for uid, sec_uid in uid_and_sec_uid.values()]
-        # results --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
-        results = loop.run_until_complete(
-            asyncio.gather(*tasks2, return_exceptions=True)
+        # 根据 uid 和 sec_uid 获取粉丝
+        results = await asyncio.gather(
+            *[self.__get_followers(uid, sec_uid) for uid, sec_uid in uid_and_sec_uid_list],
+            return_exceptions=True
         )
-        results = handle_results(results, uid_and_sec_uid.values(), '获取粉丝')
-        # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
-        followers = {k: v for result in results for k, v in result.items()}
+        results = handle_results(results, uid_and_sec_uid_list, '获取粉丝')  # 处理异常
+        # 通过 (uid, sec_uid) 获取 user_dict 中对应用户名，将用户名和粉丝对应存至 followers_dict
+        for result in results:
+            for uid, followers in result.items():
+                followers_dict.update(
+                    {user_dict[uid]: followers}
+                )
 
         # 关闭 client
-        loop.run_until_complete(self.__client.aclose())
+        await self.__client.aclose()
 
-        # 可读性为 0
-        return {k2: v1 for k1, v1 in followers.items() for k2, v2 in uid_and_sec_uid.items() if k1 == v2}
+        return followers_dict
 
 
 if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
     myapp = Douyin()
     myapp.set_user_list(['1610503127', 'chuanchuan5055'])
-    print(myapp.get_all_followers())
+    print(loop.run_until_complete(myapp.run()))
