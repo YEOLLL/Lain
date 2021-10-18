@@ -62,8 +62,8 @@ class Coolapk:
     def set_user_list(self, coolapk_user_list):
         self.__user_list = coolapk_user_list
 
-    async def __get_user_id(self, username):
-        logger.info('正在获取userid，用户名：{}', username)
+    async def __get_uid(self, username):
+        logger.info('正在获取uid，用户名：{}', username)
 
         params = (
             ('type', 'user'),
@@ -119,37 +119,47 @@ class Coolapk:
 
         return {uid: followers}
 
-    def get_all_followers(self):
-        loop = asyncio.get_event_loop()
+    async def run(self):
 
-        # 任务一，获取uid
-        tasks1 = [self.__get_user_id(user) for user in self.__user_list]
-        # results --> [ {user_number: (uid, sec_id)}, {user_number: (uid, sec_id)} ]
-        results = loop.run_until_complete(
-            asyncio.gather(*tasks1, return_exceptions=True),
-        )
-        results = handle_results(results, self.__user_list, '获取uid')
-        # uid_dict --> { username: uid, username: uid }
-        uid_dict = {k: v for result in results for k, v in result.items()}
+        user_dict = {}  # uid <-> username
+        uid_list = []  # uid, uid, uid
+        followers_dict = {}  # username <-> followers
 
-        # 任务二，获取粉丝
-        tasks2 = [self.__get_followers(uid) for uid in uid_dict.values()]
-        # results --> [ {(uid, sec_uid): followers}, {(uid, sec_uid): followers} ]
-        results = loop.run_until_complete(
-            asyncio.gather(*tasks2, return_exceptions=True)
+        # 获取 UID
+        results = await asyncio.gather(
+            *[self.__get_uid(user) for user in self.__user_list],
+            return_exceptions=True
         )
-        results = handle_results(results, list(uid_dict.values()), '获取粉丝')
-        # followers --> { (uid, sec_id): [uid], (uid, sec_uid): [uid] }
-        followers_dict = {k: v for result in results for k, v in result.items()}
+        results = handle_results(results, self.__user_list, '获取uid')  # 处理异常
+        # 将 uid 与用户名对应存进 user_dict
+        for result in results:
+            for username, uid in result.items():
+                user_dict.update(
+                    {uid: username}
+                )
+                uid_list.append(uid)
+
+        # 根据 UID 获取粉丝
+        results = await asyncio.gather(
+            *[self.__get_followers(uid) for uid in uid_list],
+            return_exceptions=True
+        )
+        results = handle_results(results, uid_list, '获取粉丝')  # 处理异常
+        # 通过 uid 获取 user_dict 中对应用户名，将用户名和粉丝对应存至 followers_dict
+        for result in results:
+            for uid, followers in result.items():
+                followers_dict.update(
+                    {user_dict[uid]: followers}
+                )
 
         # 关闭 client
-        loop.run_until_complete(self.__client.aclose())
+        await self.__client.aclose()
 
-        # 可读性为 0
-        return {k2: v1 for k1, v1 in followers_dict.items() for k2, v2 in uid_dict.items() if k1 == v2}
+        return followers_dict
 
 
 if __name__ == '__main__':
     myapp = Coolapk()
     myapp.set_user_list(['产品菜鸟吴日天'])
-    print(myapp.get_all_followers())
+    loop = asyncio.get_event_loop()
+    print(loop.run_until_complete(myapp.run()))
