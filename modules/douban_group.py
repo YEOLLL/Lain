@@ -168,39 +168,53 @@ class DoubanGroup:
 
         return {group_id: group_members}
 
-    def get_all_followers(self):
-        loop = asyncio.get_event_loop()
-
+    async def run(self):
         # 如果配置了用户名密码，先登录获取Session
         if self.__username:
-            self.__client = loop.run_until_complete(self.__create_session())
+            self.__client = await self.__create_session()
             if not self.__client:
-                logger.error('获取各帐号粉丝出错，登录失败')
                 return False
 
-        # 获取小组id
-        task1 = [self.__get_group_id(group) for group in self.__group_list]
-        results = loop.run_until_complete(
-            asyncio.gather(*task1, return_exceptions=True)
+        group_dict = {}  # group_id <-> group_name
+        group_id_list = []  # group_id, group_id, group_id
+        members_dict = {}  # group_name <-> members
+
+        # 获取 group_id
+        results = await asyncio.gather(
+            *[self.__get_group_id(group_name) for group_name in self.__group_list],
+            return_exceptions=True
         )
-        results = handle_results(results, self.__group_list, '获取小组id')
-        group_id_dict = {k: v for result in results for k, v in result.items()}
+        results = handle_results(results, self.__group_list, '获取小组id')  # 处理异常
+        # 将 group_id 与小组名对应存进 group_dict
+        for result in results:
+            for group_name, group_id in result.items():
+                group_dict.update(
+                    {group_id: group_name}
+                )
+                group_id_list.append(group_id)
 
-        # 获取小组成员
-        task2 = [self.__get_members(group_id) for group_id in group_id_dict.values()]
-        results = loop.run_until_complete(
-            asyncio.gather(*task2)
+        # 根据 group_id 获取成员
+        results = await asyncio.gather(
+            *[self.__get_members(group_id) for group_id in group_id_list],
+            return_exceptions=True
         )
-        results = handle_results(results, group_id_dict.values(), '获取小组成员')
-        member_dict = {k: v for result in results for k, v in result.items()}
+        results = handle_results(results, group_id_list, '获取小组成员')  # 处理异常
+        # 通过 group_id 获取 group_dict 中对应小组名，将小组名和成员对应存至 members_dict
+        for result in results:
+            for group_id, members in result.items():
+                members_dict.update(
+                    {group_dict[group_id]: members}
+                )
 
-        loop.run_until_complete(self.__client.aclose())
+        # 关闭 client
+        await self.__client.aclose()
 
-        return {k2: v1 for k1, v1 in member_dict.items() for k2, v2 in group_id_dict.items() if k1 == v2}
+        return members_dict
 
 
 if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
     myapp = DoubanGroup()
     group_list = ["帮军人及恋军女孩儿找对象"]
     myapp.set_user_list(group_list)
-    print(myapp.get_all_followers())
+    print(loop.run_until_complete(myapp.run()))
