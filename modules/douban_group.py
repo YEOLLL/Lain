@@ -14,8 +14,7 @@ class DoubanGroup:
         self.__group_list = None
         self.__username_closed = '[已注销]'
         self.__proxies = proxies
-        self.__client = httpx.AsyncClient(proxies=proxies)
-        self.__client.headers = {
+        self.__headers = {
             'Connection': 'keep-alive',
             'Pragma': 'no-cache',
             'Cache-Control': 'no-cache',
@@ -32,6 +31,7 @@ class DoubanGroup:
             'Referer': 'https://www.douban.com/group/',
             'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
         }
+        self.__client = httpx.AsyncClient(proxies=proxies, headers=self.__headers)
 
     def set_login_username(self, douban_username):
         self.__username = douban_username
@@ -79,23 +79,7 @@ class DoubanGroup:
         response_json = response.json()
         # 登录成功
         if response_json['status'] == 'success':
-            client.headers = {
-                'Connection': 'keep-alive',
-                'Pragma': 'no-cache',
-                'Cache-Control': 'no-cache',
-                'sec-ch-ua': '" Not A;Brand";v="99", "Chromium";v="90"',
-                'sec-ch-ua-mobile': '?0',
-                'DNT': '1',
-                'Upgrade-Insecure-Requests': '1',
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.21 (KHTML, like Gecko) konqueror/4.14.10 Safari/537.21',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-                'Sec-Fetch-Site': 'same-origin',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-User': '?1',
-                'Sec-Fetch-Dest': 'document',
-                'Referer': 'https://www.douban.com/group/',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-            }
+            client.headers = self.__headers
             return client
         # 账号或密码错误
         elif response_json['status'] == 'failed' and response_json['message'] == 'unmatch_name_password':
@@ -171,13 +155,14 @@ class DoubanGroup:
     async def run(self):
         # 如果配置了用户名密码，先登录获取Session
         if self.__username:
-            self.__client = await self.__create_session()
-            if not self.__client:
-                return False
+            results = await self.__create_session()
+            results = handle_results(results, [self.__username], '创建Session')
+            if results:
+                self.__client = results[0]
 
-        group_dict = {}  # group_id <-> group_name
-        group_id_list = []  # group_id, group_id, group_id
-        members_dict = {}  # group_name <-> members
+        group_dict = {}  # {group_id: group_name}
+        group_id_list = []  # group_id, group_id
+        members_dict = {}  # {group_name: [members]}
 
         # 获取 group_id
         results = await asyncio.gather(
