@@ -1,37 +1,30 @@
-import requests
+import httpx
+import asyncio
 from lxml import etree
 from utils.log import logger
+from utils.exception import *
+from utils.handle_results import handle_results
 
 
 class Github:
-    def __init__(self, github_proxies=None, github_user_list=None):
-        self.__session = requests.Session()
-        self.__session.proxies = github_proxies
-        self.__user_list = github_user_list
-        self.__something_wrong = False
-
-    def set_proxies(self, github_proxies):
-        self.__session.proxies = github_proxies
+    def __init__(self, proxies=None):
+        self.__client = httpx.AsyncClient(proxies=proxies)
+        self.__user_list = None
 
     def set_user_list(self, github_user_list):
         self.__user_list = github_user_list
 
-    def __get_followers(self, username):
+    async def __get_followers(self, username):
         logger.info("正在获取粉丝，用户名：{}", username)
 
         page = 1  # 页面
         followers = []
         while True:
             url = "https://github.com/{}?page={}&tab=followers".format(username, str(page))
-            try:
-                response = self.__session.get(url)
-            except requests.RequestException as e:
-                logger.error("获取粉丝失败，用户名：{}，请求失败：{}", username, e)
-                return False
+            response = await self.__client.get(url)
 
             if response.status_code != 200:
-                logger.error('获取粉丝失败，用户名：{}，HTTP状态码异常：{}', username, response.status_code)
-                return False
+                raise HttpCodeError(response.status_code)
 
             html = etree.HTML(response.text)
 
@@ -45,28 +38,28 @@ class Github:
             page += 1
 
         logger.success("获取粉丝完成，用户名：{}", username)
-        return followers
+        return {username: followers}
 
-    def get_all_followers(self):
-        followers_pool = {}
-        for user in self.__user_list:
+    async def run(self):
+        followers_dict = {}  # {username: [followers]}
 
-            if not (followers := self.__get_followers(user)):
-                self.__something_wrong = True
-                logger.warning("获取粉丝出错，执行跳过")
-                continue
-            followers_pool[user] = followers
+        # 获取粉丝
+        results = await asyncio.gather(
+            *[self.__get_followers(username) for username in self.__user_list],
+            return_exceptions=True
+        )
+        results = handle_results(results, self.__user_list, '获取粉丝')  # 处理异常
+        for result in results:
+            followers_dict.update(result)
 
-        if self.__something_wrong:
-            logger.warning("各帐号粉丝获取完成，发生了一些错误")
-        else:
-            logger.success("各帐号粉丝获取完成")
+        # 关闭 client
+        await self.__client.aclose()
 
-        return followers_pool
+        return followers_dict
 
 
 if __name__ == "__main__":
-    myapp = Github()
-    myapp.set_proxies({'https': 'http://127.0.0.1:7890/'})
+    loop = asyncio.get_event_loop()
+    myapp = Github(proxies={'https://': 'http://127.0.0.1:7890'})
     myapp.set_user_list(["YEOLLL"])
-    print(myapp.get_all_followers())
+    print(loop.run_until_complete(myapp.run()))
