@@ -121,9 +121,9 @@ class Coolapk:
 
     async def run(self):
 
-        user_dict = {}  # uid <-> username
+        user_dict = {}  # {uid: username}
         uid_list = []  # uid, uid, uid
-        followers_dict = {}  # username <-> followers
+        followers_dict = {}  # {username: [followers]}
 
         # 获取 UID
         results = await asyncio.gather(
