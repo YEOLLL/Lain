@@ -1,10 +1,12 @@
 import re
 import json
-import requests
+import httpx
+import asyncio
 import random
 import binascii
 from utils.log import logger
-from json import JSONDecodeError
+from utils.exception import *
+from utils.handle_results import handle_results
 
 
 # token生成，修改自 https://github.com/CharlesPikachu/DecryptLogin/blob/master/DecryptLogin/core/twitter.py
@@ -14,11 +16,11 @@ def generate_token(size=16):
 
 
 # 登录代码，修改自 https://github.com/CharlesPikachu/DecryptLogin/blob/master/DecryptLogin/core/twitter.py
-def twitter_login(twitter_username, twitter_password, twitter_proxies):
+async def twitter_login(twitter_username, twitter_password, twitter_proxies):
     logger.info("正在登录")
 
-    session = requests.Session()
-    session.headers = {
+    client = httpx.AsyncClient(proxies=twitter_proxies)
+    client.headers = {
         'user-agent': 'Opera/9.80 (J2ME/MIDP; Opera Mini/7.1.32052/29.3417; U; en) Presto/2.8.119 Version/11.10',
         'origin': 'https://mobile.twitter.com',
         'referer': 'https://mobile.twitter.com/login'
@@ -27,12 +29,10 @@ def twitter_login(twitter_username, twitter_password, twitter_proxies):
     login_url = 'https://twitter.com/login'
     sessions_url = 'https://twitter.com/sessions'
 
-    session.proxies = twitter_proxies
-
     # 获得authenticity_token
     authenticity_token = generate_token()
-    session.cookies.clear()
-    session.get(login_url)
+    client.cookies.clear()
+    await client.get(login_url)
 
     # 模拟登录
     cookies = {'_mb_tk': authenticity_token}
@@ -45,34 +45,24 @@ def twitter_login(twitter_username, twitter_password, twitter_proxies):
         'session[username_or_email]': twitter_username,
         'session[password]': twitter_password,
     }
-    try:
-        response = session.post(sessions_url, cookies=cookies, data=data)
-    except requests.RequestException as e:
-        logger.error("登录失败，请求失败：{}", e)
-        return False
+    response = await client.post(sessions_url, cookies=cookies, data=data)
 
     if response.status_code != 200:
-        logger.error("登录失败，HTTP状态码异常：{}", response.status_code)
-        return False
+        raise HttpCodeError(response.status_code)
 
     if response.cookies.get("twid") is None:
-        logger.error("登录失败，未能正确获取Cookies，请检查配置文件中的账户")
-        return False
+        raise LoginError
 
-    return session
+    return client
 
 
 class Twitter:
-    def __init__(self, twitter_username=None, twitter_password=None, twitter_proxies=None, twitter_user_list=None):
-        self.__username = twitter_username
-        self.__password = twitter_password
-        self.__proxies = twitter_proxies
-        self.__user_list = twitter_user_list
-        self.__session = None
-        self.__something_wrong = False
-
-    def set_proxies(self, twitter_proxies):
-        self.__proxies = twitter_proxies
+    def __init__(self, proxies=None):
+        self.__client = None
+        self.__username = None
+        self.__password = None
+        self.__proxies = proxies
+        self.__user_list = None
 
     def set_user_list(self, twitter_user_list):
         self.__user_list = twitter_user_list
@@ -83,19 +73,13 @@ class Twitter:
     def set_login_password(self, twitter_password):
         self.__password = twitter_password
 
-    def __create_session(self):
+    async def __create_session(self):
         logger.info("正在创建Session")
 
         # 登录
-        if not (session := twitter_login(self.__username, self.__password, self.__proxies)):
-            logger.error("创建Session出错，登录失败")
-            return False
+        client = await twitter_login(self.__username, self.__password, self.__proxies)
 
-        try:
-            response = session.get("https://abs.twimg.com/responsive-web/client-web/main.e1a20265.js")
-        except requests.RequestException as e:
-            logger.error("创建Session出错，请求失败：{}", e)
-            return False
+        response = await client.get("https://abs.twimg.com/responsive-web/client-web/main.e1a20265.js")
 
         if response.status_code != 200:
             logger.error('创建Session出错，HTTP状态码异常：{}', response.status_code)
@@ -108,7 +92,7 @@ class Twitter:
             return False
         else:
             auth_token = 'Bearer ' + result[0]
-            x_csrf_token = session.cookies.get("ct0")
+            x_csrf_token = client.cookies.get("ct0")
 
         headers = {
             'authority': 'twitter.com',
@@ -131,10 +115,10 @@ class Twitter:
             'referer': 'https://twitter.com/',
             'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
         }
-        session.headers = headers
-        return session
+        client.headers = headers
+        return client
 
-    def __get_user_id(self, screen_name):
+    async def __get_user_id(self, screen_name):
         logger.info("正在获取userid，用户名：{}", screen_name)
 
         variables = {
@@ -145,26 +129,19 @@ class Twitter:
         params = {
             "variables": json.dumps(variables)
         }
-        try:
-            response = self.__session.get(
-                'https://twitter.com/i/api/graphql/B-dCk4ph5BZ0UReWK590tw/UserByScreenName',
-                params=params
-            )
-        except requests.RequestException as e:
-            logger.error("获取userid失败，用户名：{}，请求失败：{}", screen_name, e)
-            return False
+
+        response = await self.__client.get(
+            'https://twitter.com/i/api/graphql/B-dCk4ph5BZ0UReWK590tw/UserByScreenName',
+            params=params
+        )
 
         if response.status_code != 200:
-            logger.error("获取userid失败，用户名：{}，HTTP状态码异常：{}", screen_name, response.status_code)
-            return False
+            raise HttpCodeError(response.status_code)
 
-        try:
-            return response.json()["data"]["user"]["result"]["rest_id"]
-        except JSONDecodeError:
-            logger.error("获取userid失败，用户名：{}，Json解析失败", screen_name)
-            return False
+        user_id = response.json()["data"]["user"]["result"]["rest_id"]
+        return {screen_name: user_id}
 
-    def __get_followers(self, user_id):
+    async def __get_followers(self, user_id):
         logger.info("正在获取粉丝，userid：{}", user_id)
 
         followers = []
@@ -186,24 +163,15 @@ class Twitter:
                 "withSuperFollowsTweetFields": True
             }
             params = {"variables": json.dumps(variables)}
-            try:
-                response = self.__session.get(
-                    'https://twitter.com/i/api/graphql/mqh0QWUpZWoiKdylGa69Jg/Followers',
-                    params=params
-                )
-            except requests.RequestException as e:
-                logger.error("获取粉丝失败，userid：{}，请求失败：{}", user_id, e)
-                return False
+            response = await self.__client.get(
+                'https://twitter.com/i/api/graphql/mqh0QWUpZWoiKdylGa69Jg/Followers',
+                params=params
+            )
 
             if response.status_code != 200:
-                logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
-                return False
+                raise HttpCodeError(response.status_code)
 
-            try:
-                instructions = response.json()["data"]["user"]["result"]["timeline"]["timeline"]["instructions"]
-            except JSONDecodeError:
-                logger.error('获取粉丝失败：userid：{}，Json解析失败', user_id)
-                return False
+            instructions = response.json()["data"]["user"]["result"]["timeline"]["timeline"]["instructions"]
 
             timeline_add_entries = [item for item in instructions if item["type"] == "TimelineAddEntries"][0]
             entries = timeline_add_entries["entries"]
@@ -220,82 +188,62 @@ class Twitter:
             if cursor.split("|")[0] == "0":
                 break
 
-        logger.success("获取粉丝完成，userid：{}", user_id)
-        return followers
+        return {user_id: followers}
 
-    def get_all_followers(self):
+    async def run(self):
         # 创建 Session
-        self.__session = self.__create_session()
-        if not self.__session:
-            logger.error("获取各帐号粉丝失败，创建Session出错")
-            return False
+        result = await asyncio.gather(
+            self.__create_session()
+        )
+        result = handle_results(result, [self.__username], '创建Session')
+        self.__client = result[0] if result else httpx.AsyncClient(proxies=self.__proxies)
 
-        follower_pool = {}
-        for user in self.__user_list:
+        user_dict = {}  # {user_id: screen_name}
+        user_id_list = []  # user_id, user_id
+        followers_dict = {}  # {screen_name: [followers]}
 
-            if not (user_id := self.__get_user_id(user)):
-                self.__something_wrong = True
-                logger.warning("获取userid出错，执行跳过")
-                continue
+        # 获取 userid
+        results = await asyncio.gather(
+            *[self.__get_user_id(screen_name) for screen_name in self.__user_list],
+            return_exceptions=True
+        )
+        results = handle_results(results, self.__user_list, '获取userid')
+        for result in results:
+            for screen_name, user_id in result.items():
+                user_dict.update(
+                    {user_id: screen_name}
+                )
+                user_id_list.append(user_id)
 
-            if not (followers := self.__get_followers(user_id)):
-                self.__something_wrong = True
-                logger.warning("获取粉丝出错，执行跳过")
-                continue
+        # 获取粉丝
+        results = await asyncio.gather(
+            *[self.__get_followers(user_id) for user_id in user_id_list],
+            return_exceptions=True
+        )
+        results = handle_results(results, user_id_list, '获取粉丝')
+        for result in results:
+            for user_id, followers in result.items():
+                followers_dict.update(
+                    {user_dict[user_id]: followers}
+                )
 
-            follower_pool[user] = followers
+        await self.__client.aclose()
 
-        if self.__something_wrong:
-            logger.warning("各帐号粉丝获取完成，发生了一些错误")
-        else:
-            logger.success("各帐号粉丝获取完成")
-
-        return follower_pool
-
-    # def get_user_name(self, screen_name):
-    #     variables = {
-    #         "screen_name": screen_name,
-    #         "withSafetyModeUserFields": True,
-    #         "withSuperFollowsUserFields": True
-    #     }
-    #     params = {"variables": json.dumps(variables)}
-    #     response = self.__session.get(
-    #         'https://twitter.com/i/api/graphql/B-dCk4ph5BZ0UReWK590tw/UserByScreenName',
-    #         params=params
-    #     )
-    #     return response.json()["data"]["user"]["result"]["legacy"]["name"]
-
-    # def both_follow_all(self, user_list):
-    #     follower_pool = []
-    #     for user in user_list:
-    #         user_id = self._get_user_id(user)
-    #         print("正在获取粉丝列表 >> " + user)
-    #         followers = self._get_followers(user_id)
-    #         follower_pool.append(followers)
-    #     target = reduce(lambda a, b: a.intersection(b), follower_pool)  # 取交集
-    #     print(target)
-    #     print(len(target))
-
-    # def both_follow_most(self, user_list):
-    #     from collections import Counter
-
-    #     follower_pool = []
-    #     counts = Counter()
-    #     for user in user_list:
-    #         user_id = self._get_user_id(user)
-    #         followers = self._get_followers(user_id)
-    #         counts += Counter(followers)
-    #     print(counts.most_common())
+        return followers_dict
 
 
 if __name__ == "__main__":
     username = ""
     password = ""
 
-    proxies = {"https": "http://127.0.0.1:7890"}
+    proxies = {"https://": "http://127.0.0.1:7890"}
 
     user_list = [""]
 
-    myapp = Twitter(username, password, proxies)
+    myapp = Twitter(proxies)
+    myapp.set_login_username(username)
+    myapp.set_login_password(password)
     myapp.set_user_list(user_list)
-    print(myapp.get_all_followers())
+
+    loop = asyncio.get_event_loop()
+    print(loop.run_until_complete(myapp.run()))
