@@ -37,6 +37,11 @@ def handle_results(results, account, msg):
             has_error = True
             error_account.append(account[index])
 
+        elif isinstance(value, JsonCodeError):
+            logger.error('{}错误，Json状态码异常：{}，Account：{}', msg, value, account[index])
+            has_error = True
+            error_account.append(account[index])
+
         elif isinstance(value, NeedLogin):
             logger.error('{}错误，平台提示需要登录，Account：{}', msg, account[index])
             has_error = True
@@ -44,6 +49,11 @@ def handle_results(results, account, msg):
 
         elif isinstance(value, LoginError):
             logger.error('{}错误，登录失败：{}，Account：{}', msg, value, account[index])
+            has_error = True
+            error_account.append(account[index])
+
+        elif isinstance(value, Exception):
+            logger.error('{}错误，未知错误：{}，Account：{}', msg, value, account[index])
             has_error = True
             error_account.append(account[index])
 
