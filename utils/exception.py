@@ -14,6 +14,10 @@ class HttpCodeError(Exception):
     pass
 
 
+class JsonCodeError(Exception):
+    pass
+
+
 class NeedLogin(Exception):
     pass
 
