@@ -1,11 +1,18 @@
+#
+# TODO: 歌手页和用户页搜索结果不同，目前只搜索用户，未来将歌手补上
+#
+
 import base64
 import binascii
 import json
 import os
-import requests
+import httpx
+import asyncio
 from Crypto.Cipher import AES
 from utils.log import logger
-from json import JSONDecodeError
+from utils.exception import *
+from utils.handle_results import handle_results
+
 
 # From https://github.com/nnnewb/NEMCore/blob/master/nemcore/encrypt.py
 MODULUS = (
@@ -23,7 +30,7 @@ NONCE = b"0CoJUm6Qyw8W8jud"
 def encrypted_request(text):
     data = json.dumps(text).encode("utf-8")
     secret = create_key(16)
-    params = aes(aes(data, NONCE), secret)
+    params = aes(aes(data, NONCE), secret).decode('utf-8')
     enc_sec_key = rsa(secret, PUBKEY, MODULUS)
     return {"params": params, "encSecKey": enc_sec_key}
 
@@ -47,19 +54,14 @@ def create_key(size):
 
 
 class NetEaseMusic:
-    def __init__(self, netease_music_proxies=None, netease_music_user_list=None):
-        self.__user_list = netease_music_user_list
-        self.__session = requests.Session()
-        self.__session.proxies = netease_music_proxies
-        self.__something_wrong = False
-
-    def set_proxies(self, netease_music_proxies):
-        self.__session.proxies = netease_music_proxies
+    def __init__(self, proxies=None):
+        self.__user_list = None
+        self.__client = httpx.AsyncClient(proxies=proxies)
 
     def set_user_list(self, netease_music_user_list):
         self.__user_list = netease_music_user_list
 
-    def __get_user_id(self, nickname):
+    async def __get_user_id(self, nickname):
         logger.info('正在获取userid，用户名：{}', nickname)
 
         text = {
@@ -69,35 +71,28 @@ class NetEaseMusic:
             "limit": 1
         }
         data = encrypted_request(text)
+        print(data)
 
-        try:
-            response = self.__session.post('https://music.163.com/weapi/search/get', data=data)
-        except requests.RequestException as e:
-            logger.error('获取userid失败，用户名：{}，请求失败：{}', nickname, e)
-            return False
+        response = await self.__client.post(
+            'https://music.163.com/weapi/search/get',
+            data=data
+        )
 
         if response.status_code != 200:
-            logger.error('获取userid失败，用户名：{}，HTTP状态码异常：{}', nickname, response.status_code)
-            return False
+            raise HttpCodeError(response.status_code)
 
-        try:
-            response_json = response.json()
-            if response_json["code"] != 200:
-                logger.error('获取userid失败，用户名：{}，Json状态码异常：{}', nickname, response_json["code"])
-                return False
-        except JSONDecodeError:
-            logger.error('获取userid失败，用户名：{}，Json解析异常', nickname)
-            return False
+        response_json = response.json()
+        if response_json["code"] != 200:
+            raise JsonCodeError(response_json['code'])
 
         result = response_json["result"]
         if result["userprofileCount"] == 0:
-            logger.warning('获取userid失败，用户名：{}，未找到此用户', nickname)
-            return False
+            raise UserNotFound
 
         user_id = result["userprofiles"][0]["userId"]
-        return user_id
+        return {nickname: user_id}
 
-    def __get_followers(self, user_id):
+    async def __get_followers(self, user_id):
         logger.info("正在获取粉丝，userid：{}", user_id)
 
         text = {
@@ -105,58 +100,66 @@ class NetEaseMusic:
             "limit": 999999999,  # 单次获取大小，应该不至于获取不完
         }
         data = encrypted_request(text)
-        try:
-            response = self.__session.post('https://music.163.com/weapi/user/getfolloweds', data=data)
-        except requests.RequestException as e:
-            logger.error('获取粉丝失败，userid：{}，请求失败：{}', user_id, e)
-            return False
+        response = await self.__client.post(
+            'https://music.163.com/weapi/user/getfolloweds',
+            data=data
+        )
 
         if response.status_code != 200:
             logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
             return False
 
-        try:
-            response_json = response.json()
-            if response_json["code"] != 200:
-                logger.error('获取粉丝失败，userid：{}，Json状态码异常：{}', user_id, response_json["code"])
-                return False
-        except JSONDecodeError:
-            logger.error('获取粉丝失败，userid：{}，Json解析异常', user_id)
-            return False
+        response_json = response.json()
+        if response_json["code"] != 200:
+            raise JsonCodeError(response_json['code'])
 
         followers = []
         result = response_json["followeds"]
         for follower in result:
             followers.append(follower["nickname"])
 
-        logger.success("获取粉丝完成，userid：{}", user_id)
-        return followers
+        return {user_id: followers}
 
-    def get_all_followers(self):
+    async def run(self):
 
-        follower_pool = {}
-        for user in self.__user_list:
+        user_dict = {}  # {user_id: nickname}
+        user_id_list = []  # user_id, user_id
+        followers_dict = {}  # {nickname: [followers]}
 
-            if not (user_id := self.__get_user_id(user)):
-                self.__something_wrong = True
-                logger.warning("获取userid出错，执行跳过")
-                continue
-            if not (followers := self.__get_followers(user_id)):
-                self.__something_wrong = True
-                logger.warning("获取粉丝出错，执行跳过")
-                continue
-            follower_pool[user] = followers
+        # 获取 userid
+        results = await asyncio.gather(
+            *[self.__get_user_id(nickname) for nickname in self.__user_list],
+            return_exceptions=True
+        )
+        results = handle_results(results, self.__user_list, '获取userid')  # 处理异常
+        for result in results:
+            for nickname, user_id in result.items():
+                user_dict.update(
+                    {user_id: nickname}
+                )
+                user_id_list.append(user_id)
 
-        if self.__something_wrong:
-            logger.warning("各帐号粉丝获取完成，发生了一些错误")
-        else:
-            logger.success("各帐号粉丝获取完成")
+        # 获取粉丝
+        results = await asyncio.gather(
+            *[self.__get_followers(user_id) for user_id in user_id_list],
+            return_exceptions=True
+        )
+        results = handle_results(results, user_id_list, '获取粉丝')  # 处理异常
+        for result in results:
+            for user_id, followers in result.items():
+                followers_dict.update(
+                    {user_dict[user_id]: followers}
+                )
 
-        return follower_pool
+        # 关闭 client
+        await self.__client.aclose()
+
+        return followers_dict
 
 
 if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
     myapp = NetEaseMusic()
-    user_list = [""]
+    user_list = ["MiliProject"]
     myapp.set_user_list(user_list)
-    print(myapp.get_all_followers())
+    print(loop.run_until_complete(myapp.run()))
