@@ -71,7 +71,6 @@ class NetEaseMusic:
             "limit": 1
         }
         data = encrypted_request(text)
-        print(data)
 
         response = await self.__client.post(
             'https://music.163.com/weapi/search/get',
