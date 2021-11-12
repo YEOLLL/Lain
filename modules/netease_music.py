@@ -103,10 +103,8 @@ class NetEaseMusic:
             'https://music.163.com/weapi/user/getfolloweds',
             data=data
         )
-
         if response.status_code != 200:
-            logger.error('获取粉丝失败，userid：{}，HTTP状态码异常：{}', user_id, response.status_code)
-            return False
+            raise HttpCodeError(response.status_code)
 
         response_json = response.json()
         if response_json["code"] != 200:
